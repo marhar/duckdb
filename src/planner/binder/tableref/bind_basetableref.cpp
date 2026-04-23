@@ -18,6 +18,12 @@
 #include "duckdb/execution/expression_executor.hpp"
 #include "duckdb/parser/query_node/cte_node.hpp"
 #include "duckdb/planner/operator/logical_dummy_scan.hpp"
+#include "duckdb/parser/expression/columnref_expression.hpp"
+#include "duckdb/parser/expression/comparison_expression.hpp"
+#include "duckdb/parser/expression/constant_expression.hpp"
+#include "duckdb/parser/expression/star_expression.hpp"
+#include "duckdb/parser/expression/window_expression.hpp"
+#include "duckdb/parser/constraints/unique_constraint.hpp"
 
 namespace duckdb {
 
@@ -116,6 +122,94 @@ void Binder::SetSearchPath(Catalog &catalog, const string &schema) {
 	entry_retriever.SetSearchPath(std::move(search_path));
 }
 
+BoundStatement Binder::BindAsOfTableRef(BaseTableRef &ref, Value asof_value) {
+	QueryErrorContext error_context(ref.query_location);
+
+	// Look up the table without the ASOF clause (no catalog time travel)
+	EntryLookupInfo table_lookup(CatalogType::TABLE_ENTRY, ref.table_name, nullptr, error_context);
+	BindSchemaOrCatalog(entry_retriever, ref.catalog_name, ref.schema_name);
+	auto table_or_view =
+	    entry_retriever.GetEntry(ref.catalog_name, ref.schema_name, table_lookup, OnEntryNotFound::THROW_EXCEPTION);
+
+	if (table_or_view->type != CatalogType::TABLE_ENTRY) {
+		throw BinderException("AS OF can only be used with base tables, not views");
+	}
+
+	auto &table = table_or_view->Cast<TableCatalogEntry>();
+
+	// Find valid_from column
+	if (!table.GetColumns().ColumnExists("valid_from")) {
+		throw BinderException("AS OF requires a 'valid_from' column in table \"%s\"", ref.table_name);
+	}
+
+	// Get primary key
+	auto pk = table.GetPrimaryKey();
+	if (!pk) {
+		throw BinderException("AS OF requires a primary key on table \"%s\"", ref.table_name);
+	}
+
+	auto &unique = pk->Cast<UniqueConstraint>();
+
+	// Get PK column names - handle both single-column and multi-column PKs
+	vector<string> pk_columns;
+	if (unique.HasIndex()) {
+		auto &col = table.GetColumns().GetColumn(unique.GetIndex());
+		pk_columns.push_back(col.Name());
+	} else {
+		pk_columns = unique.GetColumnNames();
+	}
+
+	// Separate entity keys from valid_from
+	vector<string> entity_keys;
+	bool found_valid_from = false;
+	for (auto &col_name : pk_columns) {
+		if (StringUtil::CIEquals(col_name, "valid_from")) {
+			found_valid_from = true;
+		} else {
+			entity_keys.push_back(col_name);
+		}
+	}
+	if (!found_valid_from) {
+		throw BinderException("'valid_from' must be part of the primary key for AS OF queries on table \"%s\"",
+		                      ref.table_name);
+	}
+
+	// Build: SELECT * FROM <table> WHERE valid_from <= <ts>
+	//        QUALIFY ROW_NUMBER() OVER (PARTITION BY <keys> ORDER BY valid_from DESC) = 1
+	auto select_node = make_uniq<SelectNode>();
+	select_node->select_list.push_back(make_uniq<StarExpression>());
+
+	auto base_ref = make_uniq<BaseTableRef>();
+	base_ref->catalog_name = ref.catalog_name;
+	base_ref->schema_name = ref.schema_name;
+	base_ref->table_name = ref.table_name;
+	select_node->from_table = std::move(base_ref);
+
+	// WHERE valid_from <= <asof_value>
+	select_node->where_clause = make_uniq<ComparisonExpression>(
+	    ExpressionType::COMPARE_LESSTHANOREQUALTO, make_uniq<ColumnRefExpression>("valid_from"),
+	    make_uniq<ConstantExpression>(asof_value));
+
+	// QUALIFY ROW_NUMBER() OVER (PARTITION BY <entity_keys> ORDER BY valid_from DESC) = 1
+	auto window = make_uniq<WindowExpression>("", "", "row_number");
+	for (auto &key : entity_keys) {
+		window->partitions.push_back(make_uniq<ColumnRefExpression>(key));
+	}
+	window->orders.emplace_back(OrderType::DESCENDING, OrderByNullType::NULLS_LAST,
+	                            make_uniq<ColumnRefExpression>("valid_from"));
+
+	select_node->qualify = make_uniq<ComparisonExpression>(ExpressionType::COMPARE_EQUAL, std::move(window),
+	                                                       make_uniq<ConstantExpression>(Value::INTEGER(1)));
+
+	auto select_stmt = make_uniq<SelectStatement>();
+	select_stmt->node = std::move(select_node);
+	auto subquery = make_uniq<SubqueryRef>(std::move(select_stmt));
+	subquery->alias = ref.alias.empty() ? ref.table_name : ref.alias;
+	subquery->column_name_alias = ref.column_name_alias;
+
+	return Bind(*subquery);
+}
+
 BoundStatement Binder::Bind(BaseTableRef &ref) {
 	QueryErrorContext error_context(ref.query_location);
 	// CTEs and views are also referred to using BaseTableRefs, hence need to distinguish here
@@ -151,6 +245,12 @@ BoundStatement Binder::Bind(BaseTableRef &ref) {
 	// not a CTE
 	// extract a table or view from the catalog
 	auto at_clause = BindAtClause(ref.at_clause);
+
+	// Check for AS OF clause (unit == "ASOF") — rewrite to temporal query
+	if (at_clause && at_clause->Unit() == "ASOF") {
+		return BindAsOfTableRef(ref, at_clause->GetValue());
+	}
+
 	auto entry_at_clause = at_clause ? at_clause.get() : entry_retriever.GetAtClause();
 	EntryLookupInfo table_lookup(CatalogType::TABLE_ENTRY, ref.table_name, entry_at_clause, error_context);
 	BindSchemaOrCatalog(entry_retriever, ref.catalog_name, ref.schema_name);

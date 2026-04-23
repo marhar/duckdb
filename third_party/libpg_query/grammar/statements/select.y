@@ -794,6 +794,7 @@ opt_repeatable_clause:
 at_unit:
 	TIMESTAMP { $$ = (char*) "TIMESTAMP"; }
 	| VERSION_P { $$ = (char*) "VERSION"; }
+	| ASOF { $$ = (char*) "ASOF"; }
 	;
 
 at_specifier:

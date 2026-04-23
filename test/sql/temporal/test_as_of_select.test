@@ -1,0 +1,168 @@
+# name: test/sql/temporal/test_as_of_select.test
+# description: Test AS OF clause on SELECT for temporal point-in-time queries
+# group: [temporal]
+
+statement ok
+CREATE TABLE data (
+    key VARCHAR NOT NULL,
+    valid_from TIMESTAMP NOT NULL,
+    value INTEGER,
+    PRIMARY KEY (key, valid_from)
+);
+
+statement ok
+INSERT INTO data VALUES
+    ('A', '2024-01-01', 10),
+    ('A', '2024-06-01', 20),
+    ('A', '2024-09-01', 30),
+    ('B', '2024-03-01', 100),
+    ('B', '2024-07-01', 200);
+
+# Basic AS OF query - snapshot at mid-year
+query III
+SELECT * FROM data AT(ASOF => '2024-06-15'::TIMESTAMP) ORDER BY key;
+----
+A	2024-06-01 00:00:00	20
+B	2024-03-01 00:00:00	100
+
+# AS OF exactly at a valid_from timestamp
+query III
+SELECT * FROM data AT(ASOF => '2024-06-01'::TIMESTAMP) ORDER BY key;
+----
+A	2024-06-01 00:00:00	20
+B	2024-03-01 00:00:00	100
+
+# AS OF before any B data exists
+query III
+SELECT * FROM data AT(ASOF => '2024-02-01'::TIMESTAMP) ORDER BY key;
+----
+A	2024-01-01 00:00:00	10
+
+# AS OF before any data exists
+query III
+SELECT * FROM data AT(ASOF => '2023-01-01'::TIMESTAMP) ORDER BY key;
+----
+
+# AS OF at the latest point - all latest values
+query III
+SELECT * FROM data AT(ASOF => '2025-01-01'::TIMESTAMP) ORDER BY key;
+----
+A	2024-09-01 00:00:00	30
+B	2024-07-01 00:00:00	200
+
+# AS OF with alias (alias before AT clause)
+query III
+SELECT d.* FROM data AS d AT(ASOF => '2024-06-15'::TIMESTAMP) ORDER BY d.key;
+----
+A	2024-06-01 00:00:00	20
+B	2024-03-01 00:00:00	100
+
+# AS OF with alias (no AS keyword)
+query III
+SELECT d.* FROM data d AT(ASOF => '2024-06-15'::TIMESTAMP) ORDER BY d.key;
+----
+A	2024-06-01 00:00:00	20
+B	2024-03-01 00:00:00	100
+
+# AS OF with specific columns
+query II
+SELECT key, value FROM data AT(ASOF => '2024-04-01'::TIMESTAMP) ORDER BY key;
+----
+A	10
+B	100
+
+# AS OF with WHERE clause on top
+query III
+SELECT * FROM data AT(ASOF => '2024-08-01'::TIMESTAMP) WHERE key = 'A';
+----
+A	2024-06-01 00:00:00	20
+
+# AS OF with expression (2024-01-01 + 5 months = 2024-06-01, includes A's June row)
+query III
+SELECT * FROM data AT(ASOF => '2024-01-01'::TIMESTAMP + INTERVAL '5 months') ORDER BY key;
+----
+A	2024-06-01 00:00:00	20
+B	2024-03-01 00:00:00	100
+
+# Composite primary key test
+statement ok
+CREATE TABLE prices (
+    ticker VARCHAR NOT NULL,
+    exchange VARCHAR NOT NULL,
+    valid_from TIMESTAMP NOT NULL,
+    price DECIMAL(10,2),
+    PRIMARY KEY (ticker, exchange, valid_from)
+);
+
+statement ok
+INSERT INTO prices VALUES
+    ('AAPL', 'NYSE', '2024-01-01', 150.00),
+    ('AAPL', 'NYSE', '2024-06-01', 180.00),
+    ('AAPL', 'NASDAQ', '2024-01-01', 150.50),
+    ('GOOG', 'NASDAQ', '2024-01-01', 140.00),
+    ('GOOG', 'NASDAQ', '2024-04-01', 165.00);
+
+query IIII
+SELECT * FROM prices AT(ASOF => '2024-05-01'::TIMESTAMP) ORDER BY ticker, exchange;
+----
+AAPL	NASDAQ	2024-01-01 00:00:00	150.50
+AAPL	NYSE	2024-01-01 00:00:00	150.00
+GOOG	NASDAQ	2024-04-01 00:00:00	165.00
+
+# Single-column PK (just valid_from - single entity table)
+statement ok
+CREATE TABLE config (
+    valid_from TIMESTAMP NOT NULL PRIMARY KEY,
+    setting VARCHAR
+);
+
+statement ok
+INSERT INTO config VALUES
+    ('2024-01-01', 'v1'),
+    ('2024-06-01', 'v2');
+
+query II
+SELECT * FROM config AT(ASOF => '2024-03-01'::TIMESTAMP);
+----
+2024-01-01 00:00:00	v1
+
+query II
+SELECT * FROM config AT(ASOF => '2024-07-01'::TIMESTAMP);
+----
+2024-06-01 00:00:00	v2
+
+# Error: no valid_from column
+statement ok
+CREATE TABLE no_valid_from (id INTEGER PRIMARY KEY, name VARCHAR);
+
+statement error
+SELECT * FROM no_valid_from AT(ASOF => '2024-01-01'::TIMESTAMP);
+----
+AS OF requires a 'valid_from' column
+
+# Error: no primary key
+statement ok
+CREATE TABLE no_pk (valid_from TIMESTAMP, value INTEGER);
+
+statement error
+SELECT * FROM no_pk AT(ASOF => '2024-01-01'::TIMESTAMP);
+----
+AS OF requires a primary key
+
+# Error: valid_from not in primary key
+statement ok
+CREATE TABLE bad_pk (id INTEGER PRIMARY KEY, valid_from TIMESTAMP, value INTEGER);
+
+statement error
+SELECT * FROM bad_pk AT(ASOF => '2024-01-01'::TIMESTAMP);
+----
+'valid_from' must be part of the primary key
+
+# Error: AS OF on a view
+statement ok
+CREATE VIEW data_view AS SELECT * FROM data;
+
+statement error
+SELECT * FROM data_view AT(ASOF => '2024-01-01'::TIMESTAMP);
+----
+AS OF can only be used with base tables

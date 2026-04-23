@@ -1357,6 +1357,10 @@ private:
 	static unique_ptr<TableRef> TransformParensTableRef(PEGTransformer &transformer,
 	                                                    optional_ptr<ParseResult> parse_result);
 	static unique_ptr<AtClause> TransformAtClause(PEGTransformer &transformer, optional_ptr<ParseResult> parse_result);
+	static unique_ptr<AtClause> TransformAtTimeTravelClause(PEGTransformer &transformer,
+	                                                        optional_ptr<ParseResult> parse_result);
+	static unique_ptr<AtClause> TransformAsOfClause(PEGTransformer &transformer,
+	                                                optional_ptr<ParseResult> parse_result);
 	static unique_ptr<AtClause> TransformAtSpecifier(PEGTransformer &transformer,
 	                                                 optional_ptr<ParseResult> parse_result);
 	static string TransformAtUnit(PEGTransformer &transformer, optional_ptr<ParseResult> parse_result);

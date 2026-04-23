@@ -764,6 +764,8 @@ void PEGTransformerFactory::RegisterSelect() {
 	REGISTER_TRANSFORM(TransformSubqueryReference);
 	REGISTER_TRANSFORM(TransformBaseTableRef);
 	REGISTER_TRANSFORM(TransformAtClause);
+	REGISTER_TRANSFORM(TransformAtTimeTravelClause);
+	REGISTER_TRANSFORM(TransformAsOfClause);
 	REGISTER_TRANSFORM(TransformAtSpecifier);
 	REGISTER_TRANSFORM(TransformAtUnit);
 	REGISTER_TRANSFORM(TransformValuesRef);

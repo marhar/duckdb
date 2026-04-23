@@ -1120,8 +1120,22 @@ unique_ptr<TableRef> PEGTransformerFactory::TransformParensTableRef(PEGTransform
 unique_ptr<AtClause> PEGTransformerFactory::TransformAtClause(PEGTransformer &transformer,
                                                               optional_ptr<ParseResult> parse_result) {
 	auto &list_pr = parse_result->Cast<ListParseResult>();
+	return transformer.Transform<unique_ptr<AtClause>>(list_pr.Child<ChoiceParseResult>(0).result);
+}
+
+unique_ptr<AtClause> PEGTransformerFactory::TransformAtTimeTravelClause(PEGTransformer &transformer,
+                                                                        optional_ptr<ParseResult> parse_result) {
+	auto &list_pr = parse_result->Cast<ListParseResult>();
 	auto extract_parens = ExtractResultFromParens(list_pr.Child<ListParseResult>(1));
 	return transformer.Transform<unique_ptr<AtClause>>(extract_parens);
+}
+
+unique_ptr<AtClause> PEGTransformerFactory::TransformAsOfClause(PEGTransformer &transformer,
+                                                                optional_ptr<ParseResult> parse_result) {
+	auto &list_pr = parse_result->Cast<ListParseResult>();
+	auto extract_parens = ExtractResultFromParens(list_pr.Child<ListParseResult>(1));
+	auto expr = transformer.Transform<unique_ptr<ParsedExpression>>(extract_parens);
+	return make_uniq<AtClause>("ASOF", std::move(expr));
 }
 
 unique_ptr<AtClause> PEGTransformerFactory::TransformAtSpecifier(PEGTransformer &transformer,

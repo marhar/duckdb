@@ -480,6 +480,7 @@ private:
 	void ExtractUnpivotColumnName(ParsedExpression &expr, vector<string> &result);
 
 	unique_ptr<BoundAtClause> BindAtClause(optional_ptr<AtClause> at_clause);
+	BoundStatement BindAsOfTableRef(BaseTableRef &ref, Value asof_value);
 
 	bool BindTableFunctionParameters(TableFunctionCatalogEntry &table_function,
 	                                 vector<unique_ptr<ParsedExpression>> &expressions, vector<LogicalType> &arguments,
