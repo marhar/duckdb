@@ -14,6 +14,27 @@ CREATE OR REPLACE SECRET gcs_secret (
 SELECT * FROM 'gs://my-bucket/data.parquet';
 ```
 
+## Implementation Status
+
+| Component | Status | Notes |
+|---|---|---|
+| Registration redirect (`extension_entries.hpp:1212`: aws → httpfs) | ✅ done | committed on `gcs-auth` |
+| Provider registration in httpfs (`gcs/credential_chain`) | ✅ done | spike + Phase 1 |
+| Source 2: gcloud user credentials | ✅ done | refresh-token exchange against `oauth2.googleapis.com` |
+| Source 4: GCE/GKE/Cloud Run/Cloud Functions metadata server | ✅ done | 2s timeout; verified by code inspection only (no GCE host) |
+| Chain fallthrough + helpful failure messages | ✅ done | tested |
+| `refresh_info` wiring → 401 triggers re-fetch | ✅ done | persistent secrets survive token expiry across sessions |
+| Source 1: `GOOGLE_APPLICATION_CREDENTIALS` (SA JSON key + JWT RS256) | ❌ deferred | Phase 2; needs OpenSSL JWT signing |
+| Source 3: Workload Identity Federation | ❌ deferred | Phase 3; most complex |
+| Service account impersonation modifier | ❌ deferred | Phase 3 |
+| Replace crude string JSON parsing with yyjson | ❌ deferred | works but should be cleaner before upstream PR |
+| Proactive expiry refresh (T-60s, no 401 round-trip) | ❌ deferred | quality-of-life; current code waits for 401 |
+| Mid-stream 401 during a single long file read | ❌ deferred | edge case; would need different hook than `S3FileHandle::Initialize` |
+
+All implemented work lives on branch `gcs-credential-chain` in this fork.
+Patches against `duckdb-httpfs@7e86e7a` live in
+`.github/patches/extensions/httpfs/`.
+
 ## Background
 
 Today, GCS access in DuckDB goes through the S3-compatible interop endpoint:
