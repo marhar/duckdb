@@ -175,6 +175,128 @@ sources, the named parameters, a "which should I pick?" decision tree, and
 a warning that HMAC keys remain supported for back-compat but ADC is
 recommended.
 
+## Build and Test
+
+### Prerequisites
+
+- macOS or Linux with `cmake`, `ninja` or `make`, Python 3
+- For testing source 2 (gcloud user creds): `gcloud` CLI installed and
+  `gcloud auth application-default login` already run
+- For end-to-end testing: a GCS bucket you can read
+
+### First build
+
+Clones the pinned `duckdb-httpfs` commit, applies our patch, and links it
+in. ~15 minutes on a cold cache, much faster on warm builds.
+
+```bash
+BUILD_HTTPFS=1 make -j8
+```
+
+Resulting artifacts:
+
+- `build/release/duckdb` — the CLI
+- `build/release/extension/httpfs/httpfs.duckdb_extension` — loadable extension
+- `build/release/_deps/httpfs_extension_fc-src/` — synced httpfs source (where
+  edits go if you want to modify the patch)
+
+### Rebuilding after changing the patch
+
+```bash
+FORCE_APPLY_PATCHES=1 BUILD_HTTPFS=1 make -j8
+```
+
+`FORCE_APPLY_PATCHES=1` resets the synced httpfs working tree and reapplies
+all patches. Without it, the build refuses to run if it detects local edits
+in the synced directory (a safety check).
+
+### Editing the patch
+
+Source edits go in the synced httpfs directory, then are diff-captured into
+the patch file:
+
+```bash
+# 1. Edit
+$EDITOR build/release/_deps/httpfs_extension_fc-src/src/create_secret_functions.cpp
+
+# 2. Capture the diff into our patch
+(cd build/release/_deps/httpfs_extension_fc-src && \
+ git diff src/create_secret_functions.cpp src/include/create_secret_functions.hpp) \
+ > .github/patches/extensions/httpfs/0003-gcs-credential-chain.patch
+
+# 3. Rebuild
+FORCE_APPLY_PATCHES=1 BUILD_HTTPFS=1 make -j8
+```
+
+### Smoke test — source 2 (gcloud user creds)
+
+Replace `YOUR-BUCKET/some.parquet` with something you can read:
+
+```bash
+./build/release/duckdb -c "
+LOAD httpfs;
+CREATE SECRET adc (TYPE gcs, PROVIDER credential_chain, SCOPE 'gs://YOUR-BUCKET/');
+SELECT name FROM which_secret('gs://YOUR-BUCKET/some.parquet', 'gcs');
+SELECT count(*) FROM 'gs://YOUR-BUCKET/some.parquet';
+"
+```
+
+The `SCOPE` and `which_secret()` check matter if you also have a persistent
+HMAC secret stored — the narrower scope wins, guaranteeing the credential_chain
+secret is the one used. Without the narrow scope, two same-scope secrets exist
+and the persistent HMAC could be picked silently — you'd think
+credential_chain works when the test is actually using HMAC.
+
+### Failure-mode test (no source available)
+
+```bash
+HOME=/nonexistent ./build/release/duckdb -c "
+LOAD httpfs;
+CREATE SECRET t (TYPE gcs, PROVIDER credential_chain);
+"
+```
+
+Expected: clean `IOException` in under one second naming both attempted
+sources, with instructions to run `gcloud auth application-default login` or
+move to a GCE host. No 30-second hang on the metadata server timeout (DNS
+fails fast on non-GCE hosts; the 2s timeout is only the safety net).
+
+### Persistent secret round-trip
+
+Confirms the refresh metadata survives serialization to disk:
+
+```bash
+SECRETS_DIR=$(mktemp -d)
+
+# Session A: create the persistent secret
+./build/release/duckdb -c "
+LOAD httpfs;
+SET secret_directory = '$SECRETS_DIR';
+CREATE PERSISTENT SECRET adc_p (TYPE gcs, PROVIDER credential_chain);
+"
+
+# Session B: read it back, confirm refresh fields
+./build/release/duckdb -c "
+LOAD httpfs;
+SET secret_directory = '$SECRETS_DIR';
+SELECT secret_string FROM duckdb_secrets() WHERE name='adc_p';
+"
+
+rm -rf "$SECRETS_DIR"
+```
+
+The session-B `secret_string` should contain `refresh=auto` and
+`refresh_info={'_provider': credential_chain}`. That's what enables transparent
+token refresh on a 401 in tomorrow's session.
+
+### What can't be tested locally
+
+- **Source 4 (GCE metadata server)** — only fires on GCE/GKE/Cloud
+  Run/Cloud Functions. On other hosts the source is silently skipped.
+- **Token refresh on 401** — would require waiting >1h for the OAuth
+  access token to expire, or revoking it manually with `gcloud auth revoke`.
+- **Sources 1 (SA JSON key + JWT) and 3 (WIF)** — not implemented.
+
 ## Risks & Open Questions
 
 - **OpenSSL dep in httpfs** — confirm `vcpkg.json` already pulls it in; if
