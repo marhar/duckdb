@@ -1,15 +1,16 @@
 # RFC: `PROVIDER credential_chain` for GCS via Google Application Default Credentials
 
 **Status:** Draft, seeking feedback
+
 **Affected repos:** `duckdb/duckdb-httpfs` (primary), `duckdb/duckdb` (one-line registration table change)
-**Author:** Mark Harrison
+
+**Author:** Mark Harrison (marhar@gmail.com), with Claude Code assistance
 
 ## Summary
 
 Implement a real `gcs/credential_chain` provider that authenticates to GCS using
 Google Application Default Credentials (ADC), eliminating the need for HMAC
-interop keys. Today this provider name is registered to the `aws` extension,
-which walks the *AWS* credential chain — not useful for GCS users.
+interop keys.
 
 ## Motivation
 
@@ -26,7 +27,7 @@ These are HMAC interop keys, which require:
 2. Pasting long-lived secrets into a DuckDB secret
 3. Manual rotation
 
-Google has spent the better part of a decade pushing users *away* from HMAC
+Google has spent the better part of a decade pushing users away from HMAC
 keys toward ADC, and most production GCP environments (GCE/GKE/Cloud Run/Cloud
 Functions) come with ADC pre-configured. Forcing DuckDB users back to HMAC is
 friction that other DuckDB cloud integrations (S3, R2, Azure) have already
@@ -54,7 +55,7 @@ when `auth_params.oauth2_bearer_token` is non-empty (lines 562, 586, 607, 632,
 659, 678). The existing `gcs/config` provider already accepts a `bearer_token`
 named parameter that flows into this field.
 
-What's missing: a provider that *obtains* a bearer token from ADC.
+What's missing: a provider that obtains a bearer token from ADC.
 
 ## Proposed API
 
@@ -99,6 +100,8 @@ A reasonable phased rollout:
   dep of httpfs).
 - **Phase 3**: source (3) Workload Identity Federation, plus impersonation.
 
+Phase 1 would cover the majority of use cases.
+
 ## Token lifecycle
 
 OAuth2 access tokens from Google expire in ~1h. The provider must:
@@ -112,6 +115,11 @@ OAuth2 access tokens from Google expire in ~1h. The provider must:
 The existing httpfs `refresh` machinery (`CreateS3SecretFunctions::TryRefreshS3Secret`)
 is a starting point but was designed for HMAC rotation, not OAuth refresh — may
 warrant a small extension or parallel mechanism.
+
+## Backwards Compatibility
+
+The current HMAC scheme should remain fully supported. HMAC credentials will
+not be affected by this change.
 
 ## Where should this code live?
 
@@ -164,25 +172,24 @@ instead of yyjson, single ADC source, no token caching) — its only purpose
 was to prove feasibility before opening this RFC. A production
 implementation would use yyjson, walk the full chain, and cache tokens.
 
-Spike artifacts available on request.
+Spike artifacts:
+- https://github.com/marhar/duckdb/pull/1
+- https://github.com/marhar/duckdb-httpfs/pull/1
 
 ## Open questions for maintainers
 
-1. **Home for the code** — Option A (httpfs) or Option B (new `gcp`
+1. **Phase 1 scope** — is "gcloud user creds + metadata server" enough for
+   an initial PR?
+2. **Home for the code** — Option A (httpfs) or Option B (new `gcp`
    extension)?
-2. **JWT/RS256 signing** — acceptable to add OpenSSL JWT signing inside
+3. **JWT/RS256 signing** — acceptable to add OpenSSL JWT signing inside
    httpfs for source (1)? OpenSSL is already linked, but the symbolic
    weight of "OAuth code in the HTTP filesystem extension" deserves a
    sanity check.
-3. **`CHAIN` parameter syntax** — match the existing AWS extension
+4. **`CHAIN` parameter syntax** — match the existing AWS extension
    convention (`'env;config;sts'`) or is there a preferred form?
-4. **Token caching strategy** — extend the existing `refresh` mechanism, or
+5. **Token caching strategy** — extend the existing `refresh` mechanism, or
    add a parallel OAuth-specific cache?
-5. **Phase 1 scope** — is "gcloud user creds + metadata server" enough for
-   an initial PR, with SA keys and WIF as follow-ups? Or should the first
-   PR cover the full chain?
-6. **Backwards compatibility** — HMAC `gcs/config` remains supported and
-   unchanged, correct? (The RFC assumes yes.)
 
 ## Out of scope
 
