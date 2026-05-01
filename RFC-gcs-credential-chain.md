@@ -33,21 +33,11 @@ CREATE SECRET (TYPE gcs, PROVIDER credential_chain);
 
 ## Current state
 
-In `duckdb/duckdb`, `src/include/duckdb/main/extension_entries.hpp`:
-
-```cpp
-{"s3/credential_chain",  "aws"},
-{"gcs/credential_chain", "aws"},   // ← walks AWS chain; not what GCS users want
-{"r2/credential_chain",  "aws"},
-```
 
 In `duckdb-httpfs`, `src/s3fs.cpp` already has a complete OAuth2 Bearer-token
-auth path for GCS — six call sites that send `Authorization: Bearer <token>`
-when `auth_params.oauth2_bearer_token` is non-empty (lines 562, 586, 607, 632,
-659, 678). The existing `gcs/config` provider already accepts a `bearer_token`
-named parameter that flows into this field.
+auth path for GCS. These send `Authorization: Bearer <token>` headers.
 
-What's missing: a provider that obtains a bearer token from ADC.
+This RFC creates a provider that obtains a bearer token from the Google ADC API.
 
 ## Proposed API
 
@@ -58,7 +48,7 @@ CREATE SECRET gcs_secret (
     PROVIDER credential_chain
 );
 
--- With optional refinements:
+-- optional refinements:
 CREATE SECRET gcs_secret (
     TYPE gcs,
     PROVIDER credential_chain,
@@ -104,10 +94,6 @@ OAuth2 access tokens from Google expire in ~1h. The provider must:
 - Cache the token (with ~60s skew before expiry) to avoid re-fetching on
   every request.
 - Refresh on 401 with retry-once.
-
-The existing httpfs `refresh` machinery (`CreateS3SecretFunctions::TryRefreshS3Secret`)
-is a starting point but was designed for HMAC rotation, not OAuth refresh — may
-warrant a small extension or parallel mechanism.
 
 ## Backwards Compatibility
 
@@ -245,3 +231,4 @@ SELECT * FROM 'gs://mybucket/tiny.parquet';
 │     42 │ Every cloud tells a story... │
 └────────┴──────────────────────────────┘
 ```
+
