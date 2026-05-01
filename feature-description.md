@@ -27,7 +27,7 @@ SELECT * FROM 'gs://my-bucket/data.parquet';
 | Source 1: `GOOGLE_APPLICATION_CREDENTIALS` (SA JSON key + JWT RS256) | ❌ deferred | Phase 2; needs OpenSSL JWT signing |
 | Source 3: Workload Identity Federation | ❌ deferred | Phase 3; most complex |
 | Service account impersonation modifier | ❌ deferred | Phase 3 |
-| Replace crude string JSON parsing with yyjson | ❌ deferred | works but should be cleaner before upstream PR |
+| Production-quality JSON parsing | ✅ done | uses `StringUtil::ParseJSONMap` (yyjson under the hood) via DuckDB core's public API; required-field validation throws on missing/empty values |
 | Proactive expiry refresh (T-60s, no 401 round-trip) | ❌ deferred | quality-of-life; current code waits for 401 |
 | Mid-stream 401 during a single long file read | ❌ deferred | edge case; would need different hook than `S3FileHandle::Initialize` |
 
@@ -122,7 +122,7 @@ New module `extension/httpfs/gcs/google_credentials.{hpp,cpp}`:
   `MetadataServerCredentials`, `WorkloadIdentityCredentials`
 - JWT RS256 signing via OpenSSL (already a transitive dep — confirm in
   httpfs `vcpkg.json`)
-- JSON parsing via existing `yyjson`
+- JSON parsing via `StringUtil::ParseJSONMap` (DuckDB core's public yyjson-backed API)
 - HTTPS via the existing httpfs HTTP client
 - Thread-safe token cache with refresh-before-expiry (60s skew)
 
