@@ -8,7 +8,7 @@
 
 ## Summary
 
-Implement a real `gcs/credential_chain` provider that authenticates to GCS using
+Implement a `gcs/credential_chain` provider that authenticates to GCS using
 Google Application Default Credentials (ADC), eliminating the need for HMAC
 interop keys.
 
@@ -20,20 +20,12 @@ GCS users currently have one option in DuckDB:
 CREATE SECRET (TYPE gcs, KEY_ID '...', SECRET '...');
 ```
 
-These are HMAC interop keys, which require:
+These are HMAC keys, which require generating and managing the key pair.
+Google recomments using ADC over HMAC and has incorporated ADC support
+into most Cloud systems.
 
-1. Generating an HMAC key pair tied to a GCP service account through the
-   console or `gsutil`
-2. Pasting long-lived secrets into a DuckDB secret
-3. Manual rotation
-
-Google has spent the better part of a decade pushing users away from HMAC
-keys toward ADC, and most production GCP environments (GCE/GKE/Cloud Run/Cloud
-Functions) come with ADC pre-configured. Forcing DuckDB users back to HMAC is
-friction that other DuckDB cloud integrations (S3, R2, Azure) have already
-eliminated via `credential_chain`.
-
-The proposed change brings GCS to parity:
+The proposed change brings GCS to parity with other clouds that implement
+authentication via credential chains.
 
 ```sql
 CREATE SECRET (TYPE gcs, PROVIDER credential_chain);
@@ -100,7 +92,8 @@ A reasonable phased rollout:
   dep of httpfs).
 - **Phase 3**: source (3) Workload Identity Federation, plus impersonation.
 
-Phase 1 would cover the majority of use cases.
+Sources (2) and (4) cover the majority of use cases; it might be reasonable
+to start with these and see if there is demand before implementing (1), (3), and (5).
 
 ## Token lifecycle
 
@@ -172,31 +165,39 @@ instead of yyjson, single ADC source, no token caching) — its only purpose
 was to prove feasibility before opening this RFC. A production
 implementation would use yyjson, walk the full chain, and cache tokens.
 
+For convenience of code verification, Print lines with `[GCS-ADC]` prefix were added to the spike.
+These of course should be removed before final submission.
+
 Spike artifacts:
 - https://github.com/marhar/duckdb/pull/1
 - https://github.com/marhar/duckdb-httpfs/pull/1
+- test cases and results for persistent and transient secrets.
+
+```
+gcs-test-persistent.out
+gcs-test-persistent.sh
+gcs-test.out
+gcs-test.sh
+```
 
 ## Open questions for maintainers
 
-1. **Phase 1 scope** — is "gcloud user creds + metadata server" enough for
-   an initial PR?
-2. **Home for the code** — Option A (httpfs) or Option B (new `gcp`
+1. **Home for the code** — Option A (httpfs) or Option B (new `gcp`
    extension)?
-3. **JWT/RS256 signing** — acceptable to add OpenSSL JWT signing inside
+2. **JWT/RS256 signing** — acceptable to add OpenSSL JWT signing inside
    httpfs for source (1)? OpenSSL is already linked, but the symbolic
    weight of "OAuth code in the HTTP filesystem extension" deserves a
    sanity check.
-4. **`CHAIN` parameter syntax** — match the existing AWS extension
+3. **`CHAIN` parameter syntax** — match the existing AWS extension
    convention (`'env;config;sts'`) or is there a preferred form?
-5. **Token caching strategy** — extend the existing `refresh` mechanism, or
+4. **Token caching strategy** — extend the existing `refresh` mechanism, or
    add a parallel OAuth-specific cache?
 
 ## Out of scope
 
 - Changing the default GCS auth method. HMAC `gcs/config` continues to
-  work, unchanged.
+  work as-is.
 - A general-purpose OAuth2 framework. This is GCS-specific.
-- Service-account key rotation tooling.
 - Removing or deprecating the existing `bearer_token` named parameter on
   `gcs/config` (which lets users supply a token they obtained externally).
 
@@ -207,3 +208,40 @@ Spike artifacts:
 2. Indication of whether a phased PR (Phase 1 first) would be welcome, or
    whether you'd prefer a single comprehensive PR.
 3. Once aligned, I'll open a PR against the agreed-upon repo.
+
+
+## Test Run Output
+```
+================================================================================================================== credential chain
+[GCS-ADC] CREATE SECRET (TYPE gcs, PROVIDER credential_chain) name='s1' input_options=0
+[GCS-ADC]   no SCOPE provided; defaulting to ['gcs://', 'gs://']
+[GCS-ADC] trying source: gcloud user credentials
+[GCS-ADC]   source 2 (gcloud): checking /Users/markharrison/.config/gcloud/application_default_credentials.json
+[GCS-ADC]   source 2 (gcloud): read 385 bytes from credentials file
+[GCS-ADC]   source 2 (gcloud): parsed client_id (72 chars), client_secret (24 chars), refresh_token (103 chars) — values not printed
+[GCS-ADC]   source 2 (gcloud): POST https://oauth2.googleapis.com/token (form body 268 bytes)
+[GCS-ADC]   source 2 (gcloud): token endpoint responded status=200 body=1456 bytes
+[GCS-ADC]   source 2 (gcloud): extracted access_token (256 chars) — value not printed
+[GCS-ADC]   → SUCCESS from gcloud user credentials (token 256 chars)
+[GCS-ADC] storing bearer_token in KeyValueSecret (256 chars)
+[GCS-ADC] set refresh=auto + refresh_info STRUCT (1 fields) — 401 hook will refire this function on token expiry
+[GCS-ADC] CREATE SECRET complete
+CREATE SECRET s1 (
+  TYPE gcs,
+  PROVIDER credential_chain
+);
+FROM duckdb_secrets();
+┌─────────┬─────────┬──────────────────┬────────────┬─────────┬─────────────────────┬─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│  name   │  type   │     provider     │ persistent │ storage │        scope        │                                                                          secret_string                                                                          │
+│ varchar │ varchar │     varchar      │  boolean   │ varchar │      varchar[]      │                                                                             varchar                                                                             │
+├─────────┼─────────┼──────────────────┼────────────┼─────────┼─────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ s1      │ gcs     │ credential_chain │ false      │ memory  │ ['gcs://', 'gs://'] │ name=s1;type=gcs;provider=credential_chain;serializable=true;scope=gcs://,gs://;bearer_token=redacted;refresh=auto;refresh_info={'_provider': credential_chain} │
+└─────────┴─────────┴──────────────────┴────────────┴─────────┴─────────────────────┴─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+SELECT * FROM 'gs://mybucket/tiny.parquet';
+┌────────┬──────────────────────────────┐
+│ Answer │            status            │
+│ int32  │           varchar            │
+├────────┼──────────────────────────────┤
+│     42 │ Every cloud tells a story... │
+└────────┴──────────────────────────────┘
+```
