@@ -146,10 +146,12 @@ A working proof of concept exists locally (≈150-line patch on top of httpfs
   successfully against a real `gs://` bucket (verified with a 42k-row
   parquet read)
 
-The spike intentionally cuts corners (crude string-based JSON parsing
-instead of yyjson, single ADC source, no token caching) — its only purpose
-was to prove feasibility before opening this RFC. A production
-implementation would use yyjson, walk the full chain, and cache tokens.
+The spike intentionally cut corners (single ADC source, no token caching)
+— its only purpose was to prove feasibility before opening this RFC. The
+follow-up PR upgrades JSON parsing to use DuckDB core's
+`StringUtil::ParseJSONMap` (yyjson under the hood, exposed via the public
+API; no new dependencies for httpfs). A full production implementation
+would also walk the complete ADC chain and cache tokens.
 
 For convenience of code verification, Print lines with `[GCS-ADC]` prefix were added to the spike.
 These of course should be removed before final submission.
