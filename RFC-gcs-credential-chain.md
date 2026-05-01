@@ -1,4 +1,4 @@
-# RFC: `PROVIDER credential_chain` for GCS via Google Application Default Credentials
+# RFC: Add Google ADC credential_chain for GCS (gs://) authentication
 
 **Status:** Draft, seeking feedback
 
