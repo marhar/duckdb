@@ -1,0 +1,92 @@
+SET secret_directory='/var/folders/kc/sjv_7dvn3wz7v1sfph2dmlq00000gp/T/tmp.3FKlxSc3D4';
+.print ================================================================================================================== NO SECRETS
+================================================================================================================== NO SECRETS
+FROM duckdb_secrets();
+┌─────────┬─────────┬──────────┬────────────┬─────────┬───────────┬───────────────┐
+│  name   │  type   │ provider │ persistent │ storage │   scope   │ secret_string │
+│ varchar │ varchar │ varchar  │  boolean   │ varchar │ varchar[] │    varchar    │
+└─────────┴─────────┴──────────┴────────────┴─────────┴───────────┴───────────────┘
+                                      0 rows                                     
+HTTP Error: HTTP GET error reading 'https://storage.googleapis.com/marhar-scratch/tiny.parquet' in region '' (HTTP 403 Forbidden)
+
+AccessDenied: Access denied.
+
+Authentication Failure - this is usually caused by invalid or missing credentials.
+* No credentials are provided.
+* See https://duckdb.org/docs/stable/extensions/httpfs/s3api.html
+
+Authentication Failure - GCS authentication failed.
+* No credentials provided.
+* For Google Application Default Credentials (recommended): CREATE SECRET (TYPE GCS, PROVIDER credential_chain);
+* For OAuth2 bearer token: CREATE SECRET (TYPE GCS, bearer_token 'your-token')
+* For HMAC interop keys: CREATE SECRET (TYPE GCS, key_id 'key', secret 'secret')
+SELECT * FROM 'gs://marhar-scratch/tiny.parquet';
+
+.print ================================================================================================================== HMAC
+================================================================================================================== HMAC
+CREATE SECRET s1 (
+  TYPE GCS,
+  KEY_ID 'redacted',
+  SECRET 'redacted'
+);
+┌─────────┐
+│ Success │
+│ boolean │
+├─────────┤
+│ true    │
+└─────────┘
+FROM duckdb_secrets();
+┌─────────┬─────────┬──────────┬────────────┬─────────┬─────────────────────┬───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│  name   │  type   │ provider │ persistent │ storage │        scope        │                                                     secret_string                                                     │
+│ varchar │ varchar │ varchar  │  boolean   │ varchar │      varchar[]      │                                                        varchar                                                        │
+├─────────┼─────────┼──────────┼────────────┼─────────┼─────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ s1      │ gcs     │ config   │ false      │ memory  │ ['gcs://', 'gs://'] │ name=s1;type=gcs;provider=config;serializable=true;scope=gcs://,gs://;key_id=redacted;secret=redacted │
+└─────────┴─────────┴──────────┴────────────┴─────────┴─────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+SELECT * FROM 'gs://marhar-scratch/tiny.parquet';
+┌────────┬──────────────────────────────┐
+│ Answer │            status            │
+│ int32  │           varchar            │
+├────────┼──────────────────────────────┤
+│     42 │ Every cloud tells a story... │
+└────────┴──────────────────────────────┘
+
+.print ================================================================================================================== credential chain
+================================================================================================================== credential chain
+DROP SECRET s1;
+[GCS-ADC] CREATE SECRET (TYPE gcs, PROVIDER credential_chain) name='s1' input_options=0
+[GCS-ADC]   no SCOPE provided; defaulting to ['gcs://', 'gs://']
+[GCS-ADC] trying source: gcloud user credentials
+[GCS-ADC]   source 2 (gcloud): checking /Users/markharrison/.config/gcloud/application_default_credentials.json
+[GCS-ADC]   source 2 (gcloud): read 385 bytes from credentials file
+[GCS-ADC]   source 2 (gcloud): parsed client_id (72 chars), client_secret (24 chars), refresh_token (103 chars) — values not printed
+[GCS-ADC]   source 2 (gcloud): POST https://oauth2.googleapis.com/token (form body 268 bytes)
+[GCS-ADC]   source 2 (gcloud): token endpoint responded status=200 body=1456 bytes
+[GCS-ADC]   source 2 (gcloud): extracted access_token (256 chars) — value not printed
+[GCS-ADC]   → SUCCESS from gcloud user credentials (token 256 chars)
+[GCS-ADC] storing bearer_token in KeyValueSecret (256 chars)
+[GCS-ADC] set refresh=auto + refresh_info STRUCT (1 fields) — 401 hook will refire this function on token expiry
+[GCS-ADC] CREATE SECRET complete
+CREATE SECRET s1 (
+  TYPE gcs,
+  PROVIDER credential_chain
+);
+┌─────────┐
+│ Success │
+│ boolean │
+├─────────┤
+│ true    │
+└─────────┘
+FROM duckdb_secrets();
+┌─────────┬─────────┬──────────────────┬────────────┬─────────┬─────────────────────┬─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│  name   │  type   │     provider     │ persistent │ storage │        scope        │                                                                          secret_string                                                                          │
+│ varchar │ varchar │     varchar      │  boolean   │ varchar │      varchar[]      │                                                                             varchar                                                                             │
+├─────────┼─────────┼──────────────────┼────────────┼─────────┼─────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ s1      │ gcs     │ credential_chain │ false      │ memory  │ ['gcs://', 'gs://'] │ name=s1;type=gcs;provider=credential_chain;serializable=true;scope=gcs://,gs://;bearer_token=redacted;refresh=auto;refresh_info={'_provider': credential_chain} │
+└─────────┴─────────┴──────────────────┴────────────┴─────────┴─────────────────────┴─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+SELECT * FROM 'gs://marhar-scratch/tiny.parquet';
+┌────────┬──────────────────────────────┐
+│ Answer │            status            │
+│ int32  │           varchar            │
+├────────┼──────────────────────────────┤
+│     42 │ Every cloud tells a story... │
+└────────┴──────────────────────────────┘

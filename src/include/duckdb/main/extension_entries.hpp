@@ -1209,7 +1209,7 @@ static constexpr ExtensionEntry EXTENSION_SECRET_PROVIDERS[] = {
     {"gcs/config", "httpfs"},
     {"r2/config", "httpfs"},
     {"s3/credential_chain", "aws"},
-    {"gcs/credential_chain", "aws"},
+    {"gcs/credential_chain", "httpfs"},
     {"r2/credential_chain", "aws"},
     {"aws/credential_chain", "aws"},
     {"azure/access_token", "azure"},

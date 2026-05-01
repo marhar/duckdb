@@ -1,0 +1,39 @@
+SET secret_directory='/var/folders/kc/sjv_7dvn3wz7v1sfph2dmlq00000gp/T/tmp.Eqi4RdvnBW';
+.print ================================================================================================================== persistent credential chain
+================================================================================================================== persistent credential chain
+[GCS-ADC] CREATE SECRET (TYPE gcs, PROVIDER credential_chain) name='s1' input_options=0
+[GCS-ADC]   no SCOPE provided; defaulting to ['gcs://', 'gs://']
+[GCS-ADC] trying source: gcloud user credentials
+[GCS-ADC]   source 2 (gcloud): checking /Users/markharrison/.config/gcloud/application_default_credentials.json
+[GCS-ADC]   source 2 (gcloud): read 385 bytes from credentials file
+[GCS-ADC]   source 2 (gcloud): parsed client_id (72 chars), client_secret (24 chars), refresh_token (103 chars) — values not printed
+[GCS-ADC]   source 2 (gcloud): POST https://oauth2.googleapis.com/token (form body 268 bytes)
+[GCS-ADC]   source 2 (gcloud): token endpoint responded status=200 body=1456 bytes
+[GCS-ADC]   source 2 (gcloud): extracted access_token (256 chars) — value not printed
+[GCS-ADC]   → SUCCESS from gcloud user credentials (token 256 chars)
+[GCS-ADC] storing bearer_token in KeyValueSecret (256 chars)
+[GCS-ADC] set refresh=auto + refresh_info STRUCT (1 fields) — 401 hook will refire this function on token expiry
+[GCS-ADC] CREATE SECRET complete
+CREATE SECRET s1 (
+  TYPE gcs,
+  PROVIDER credential_chain
+);
+┌─────────┐
+│ Success │
+│ boolean │
+├─────────┤
+│ true    │
+└─────────┘
+================================================================================================================== read persistent credential chain
+┌───────────────┬─────────┬──────────┬────────────┬────────────┬─────────────────────┬──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│     name      │  type   │ provider │ persistent │  storage   │        scope        │                                                          secret_string                                                           │
+│    varchar    │ varchar │ varchar  │  boolean   │  varchar   │      varchar[]      │                                                             varchar                                                              │
+├───────────────┼─────────┼──────────┼────────────┼────────────┼─────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ __default_gcs │ gcs     │ config   │ true       │ local_file │ ['gcs://', 'gs://'] │ name=__default_gcs;type=gcs;provider=config;serializable=true;scope=gcs://,gs://;key_id=redacted;secret=redacted │
+└───────────────┴─────────┴──────────┴────────────┴────────────┴─────────────────────┴──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌────────┬──────────────────────────────┐
+│ Answer │            status            │
+│ int32  │           varchar            │
+├────────┼──────────────────────────────┤
+│     42 │ Every cloud tells a story... │
+└────────┴──────────────────────────────┘
